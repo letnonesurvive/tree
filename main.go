@@ -5,99 +5,165 @@ import (
 	"io"
 	"io/fs"
 	"os"
-	"path/filepath"
-	"strings"
+	"strconv"
 )
 
-func printDir(out io.Writer, n int, dirName string, isLastDir bool, isParentDirLast bool) {
-	beginSymbol := "├"
-	lastDirSymbol := "└"
-	for i := 0; i < n-1; i++ {
-		if isParentDirLast || i == n-2 {
-			fmt.Fprintf(out, "|")
-		}
-		fmt.Fprintf(out, "\t")
-	}
-	if isLastDir {
-		fmt.Fprintf(out, lastDirSymbol)
-	} else {
-		fmt.Fprintf(out, beginSymbol)
-	}
-	fmt.Fprintf(out, "───"+dirName+"\n")
+const beginSymbol string = "├"
+const lastDirSymbol string = "└"
 
+type visitorTree struct {
+	out           io.Writer
+	depth         int
+	pipes         int
+	printedResult string
 }
 
-// func printDirs(out io.Writer, dirs []string) {
-// 	for i := 0; i < len(dirs); i++ {
-// 		nesting := strings.SplitN(dirs[i], "/", -1)
-// 		n := len(nesting)
-// 		isLastDir := (i == len(dirs)-1) || (strings.Count(dirs[i+1], "/") < n-1)
-// 		printDir(out, n, nesting[n-1], isLastDir)
-// 	}
-// }
-
-func getFiles(path string, printFiles bool) []string {
-
-	// entries, _ := os.ReadDir(path)
-	// files := make(map[string]bool, len(entries))
-
-	// sort.Slice(entries, func(i, j int) bool {
-	// 	return entries[i].Name() < entries[j].Name()
-	// })
-
-	// for i := 0; i < len(entries); i++ {
-	// 	if printFiles {
-	// 		files[entries[i].Name()] = false
-	// 	} else if !printFiles && entries[i].IsDir() {
-	// 		files[entries[i].Name()] = false
-	// 	}
-	// }
-
-	//fmt.Println(files)
-	var dirs []string
-
-	filepath.WalkDir(path, func(p string, d fs.DirEntry, err error) error {
-		entries, _ := os.ReadDir(path)
-		fmt.Println(entries[len(entries)-1])
-		// if printFiles {
-		// 	if strings.Contains(p, path+"/") {
-		// 		p = strings.Replace(p, path+"/", "", 1)
-		// 		if d.Type().IsRegular() {
-		// 			var size string = ""
-		// 			info, _ := d.Info()
-		// 			size = strconv.FormatInt(info.Size(), 10)
-		// 			if size == "0" {
-		// 				size = "empty"
-		// 			}
-		// 			p += " (" + size + ")"
-		// 		}
-		// 		dirs = append(dirs, p)
-		// 	}
-		// } else {
-		if strings.Contains(p, path+"/") && d.IsDir() {
-			p = strings.Replace(p, path+"/", "", 1)
-			dirs = append(dirs, p)
+func printTab(visitor *visitorTree) {
+	for j := 0; j < visitor.depth; j++ {
+		if j < visitor.pipes {
+			visitor.printedResult += "│\t"
+		} else {
+			visitor.printedResult += "\t"
 		}
-		//}
-		return nil
-	})
-	return dirs
+	}
+}
+
+func (visitor *visitorTree) visitEnter(tree *treeNode) {
+
+	if len(tree.children) != 0 {
+		visitor.depth++
+	}
+
+	for i := 0; i < len(tree.children); i++ {
+		printTab(visitor)
+		file := tree.children[i].value
+		if i < len(tree.children)-1 {
+			visitor.printedResult += beginSymbol
+			if len(tree.children[i].children) != 0 {
+				visitor.pipes++
+			}
+		} else {
+			visitor.printedResult += lastDirSymbol
+		}
+		visitor.printedResult += "───" + file.name
+		if file.fileType == RegularFile {
+			visitor.printedResult += " (" + file.size + ")"
+		}
+		visitor.printedResult += "\n"
+		if len(tree.children[i].children) != 0 {
+			visitor.visitEnter(tree.children[i])
+			visitor.visitLeave(tree.children[i])
+		}
+	}
+}
+
+func (visitor *visitorTree) visitLeave(_ *treeNode) {
+	if visitor.depth != 0 {
+		visitor.depth--
+
+	}
+	if visitor.pipes != 0 && visitor.pipes != visitor.depth {
+		visitor.pipes--
+	}
+}
+
+type treeNode struct {
+	value    file
+	children []*treeNode
+}
+
+type fileType uint
+
+const (
+	RegularFile = iota
+	Dirrectory
+)
+
+type file struct {
+	name     string
+	size     string
+	fileType fileType
+}
+
+func (tree *treeNode) accept(visitor *visitorTree) {
+	visitor.visitEnter(tree)
+	visitor.visitLeave(tree)
+}
+
+func buildTree(path string, printFiles bool) []*treeNode {
+	currentEntries, _ := os.ReadDir(path)
+
+	var files []file
+
+	if !printFiles {
+		for i := 0; i < len(currentEntries); i++ {
+			if !currentEntries[i].IsDir() {
+				continue
+			}
+			var file file
+			file.fileType = Dirrectory
+			file.name = currentEntries[i].Name()
+			files = append(files, file)
+		}
+	} else {
+		for i := 0; i < len(currentEntries); i++ {
+			size := ""
+			var file file
+			file.fileType = Dirrectory
+			file.name = currentEntries[i].Name()
+			var entry fs.DirEntry = currentEntries[i]
+			info, _ := entry.Info()
+			if !entry.IsDir() {
+				file.fileType = RegularFile
+				size = "empty"
+				if info.Size() != 0 {
+					size = strconv.Itoa(int(info.Size())) + "b"
+				}
+				file.size = size
+			}
+
+			files = append(files, file)
+		}
+	}
+
+	res := make([]*treeNode, len(files))
+
+	for i := 0; i < len(files); i++ {
+		treeNode := new(treeNode)
+		treeNode.value = files[i]
+		treeNode.children = buildTree(path+"/"+treeNode.value.name, printFiles)
+		res[i] = treeNode
+	}
+	return res
 }
 
 func dirTree(out io.Writer, path string, printFiles bool) error {
-	dirs := getFiles(path, printFiles)
-	//printDirs(out, dirs)
+	root := new(treeNode)
+	var file file
+	root.value = file
+	root.children = buildTree(path, printFiles)
+
+	var visitor visitorTree
+	visitor.out = out
+	visitor.depth = -1
+	visitor.pipes = 0
+	visitor.printedResult = ""
+	root.accept(&visitor)
+
+	fmt.Fprintf(out, visitor.printedResult)
+
 	return nil
 }
 
 func main() {
+	//out, _ := os.Create("output.txt")
 	out := os.Stdout
 	if !(len(os.Args) == 2 || len(os.Args) == 3) {
 		panic("usage go run main.go . [-f]")
 	}
 	path := os.Args[1]
-	//printFiles := len(os.Args) == 3 && os.Args[2] == "-f"
-	err := dirTree(out, path, false)
+	printFiles := len(os.Args) == 3 && os.Args[2] == "-f"
+	err := dirTree(out, path, printFiles)
 	if err != nil {
 		panic(err.Error())
 	}

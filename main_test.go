@@ -48,8 +48,7 @@ func TestTreeFull(t *testing.T) {
 	}
 }
 
-const testDirResult = `
-├───project
+const testDirResult = `├───project
 ├───static
 │	├───a_lorem
 │	│	└───ipsum
@@ -70,6 +69,7 @@ func TestTreeDir(t *testing.T) {
 		t.Errorf("test for OK Failed - error")
 	}
 	result := out.String()
+
 	if result != testDirResult {
 		t.Errorf("test for OK Failed - results not match\nGot:\n%v\nExpected:\n%v", result, testDirResult)
 	}
