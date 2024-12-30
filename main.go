@@ -6,24 +6,25 @@ import (
 	"io/fs"
 	"os"
 	"strconv"
+	"strings"
 )
 
 const beginSymbol string = "├"
 const lastDirSymbol string = "└"
 
 type visitorTree struct {
-	out           io.Writer
-	depth         int
-	pipes         int
-	printedResult string
+	out     io.Writer
+	depth   int
+	pipes   int
+	builder strings.Builder
 }
 
 func printTab(visitor *visitorTree) {
 	for j := 0; j < visitor.depth; j++ {
 		if j < visitor.pipes {
-			visitor.printedResult += "│\t"
+			visitor.builder.WriteString("│\t")
 		} else {
-			visitor.printedResult += "\t"
+			visitor.builder.WriteString("\t")
 		}
 	}
 }
@@ -38,18 +39,18 @@ func (visitor *visitorTree) visitEnter(tree *treeNode) {
 		printTab(visitor)
 		file := tree.children[i].value
 		if i < len(tree.children)-1 {
-			visitor.printedResult += beginSymbol
+			visitor.builder.WriteString(beginSymbol)
 			if len(tree.children[i].children) != 0 {
 				visitor.pipes++
 			}
 		} else {
-			visitor.printedResult += lastDirSymbol
+			visitor.builder.WriteString(lastDirSymbol)
 		}
-		visitor.printedResult += "───" + file.name
+		fmt.Fprintf(&visitor.builder, "───%s", file.name)
 		if file.fileType == RegularFile {
-			visitor.printedResult += " (" + file.size + ")"
+			fmt.Fprintf(&visitor.builder, " (%s)", file.size)
 		}
-		visitor.printedResult += "\n"
+		visitor.builder.WriteString("\n")
 		if len(tree.children[i].children) != 0 {
 			visitor.visitEnter(tree.children[i])
 			visitor.visitLeave(tree.children[i])
@@ -60,7 +61,6 @@ func (visitor *visitorTree) visitEnter(tree *treeNode) {
 func (visitor *visitorTree) visitLeave(_ *treeNode) {
 	if visitor.depth != 0 {
 		visitor.depth--
-
 	}
 	if visitor.pipes != 0 && visitor.pipes != visitor.depth {
 		visitor.pipes--
@@ -147,10 +147,10 @@ func dirTree(out io.Writer, path string, printFiles bool) error {
 	visitor.out = out
 	visitor.depth = -1
 	visitor.pipes = 0
-	visitor.printedResult = ""
+	visitor.builder = strings.Builder{}
 	root.accept(&visitor)
 
-	fmt.Fprintf(out, visitor.printedResult)
+	fmt.Fprintf(out, visitor.builder.String())
 
 	return nil
 }
